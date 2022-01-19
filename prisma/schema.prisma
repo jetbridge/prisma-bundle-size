@@ -1,8 +1,6 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["interactiveTransactions"]
 }
 
 datasource db {
@@ -10,6 +8,832 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model CoolTable {
-  id String @id
+// represents a saved match for a candidate/vacancy pair
+// https://github.com/jetbridge/platform/issues/335
+model CandidateVacancyMatch {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  isLatest Boolean
+
+  candidateId    String  @db.Uuid
+  candidateRawId String? @db.Uuid
+  vacancyId      String  @db.Uuid
+
+  aiVersion Int
+  match     Float? @db.DoublePrecision
+
+  Candidate    Candidate     @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  CandidateRaw CandidateRaw? @relation(fields: [candidateRawId], references: [id], onDelete: Cascade)
+  Vacancy      Vacancy       @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId, vacancyId])
+}
+
+model CandidateReviewQuestion {
+  id        String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime      @default(now()) @db.Timestamptz
+  text      String
+  type      QuestionType
+  group     QuestionGroup
+  vacancyId String?       @db.Uuid
+
+  possibleOptions String[]
+
+  CandidateReviewQuestionAnswer CandidateReviewQuestionAnswer[]
+  Vacancy                       Vacancy?                        @relation(fields: [vacancyId], references: [id])
+}
+
+// raw data we are getting from LI or GH (or other places)
+// it will include ALL information we are getting from that API including things we *think* we dont need
+model CandidateRaw {
+  id                    String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt             DateTime                @default(now()) @db.Timestamptz
+  digestSha256          String
+  data                  Json
+  source                CandidateSource
+  sourceVersion         String
+  candidateId           String                  @db.Uuid
+  Candidate             Candidate               @relation(fields: [candidateId], references: [id])
+  CandidateParseHistory CandidateParseHistory[]
+
+  User   User?   @relation(fields: [userId], references: [id])
+  userId String? @db.Uuid
+
+  CandidateVacancyMatch CandidateVacancyMatch[]
+  @@unique([userId, digestSha256, candidateId])
+}
+
+// Represents the last time we parsed a CandidateRaw entry and what parser version was used.
+// it may happen that we will parse the same CandidateRaw multiple times with different parser versions (to get more and more data)
+model CandidateParseHistory {
+  id             String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt      DateTime     @default(now()) @db.Timestamptz
+  parserVersion  String
+  candidateId    String       @db.Uuid
+  candidateRawId String       @db.Uuid
+  CandidateRaw   CandidateRaw @relation(fields: [candidateRawId], references: [id], onDelete: Cascade)
+  Candidate      Candidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model CandidateReviewQuestionAnswer {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  answer      String
+  reporterId  String? @db.Uuid // connection to user that provided the answer (usually interviewer or HR person) also for now it maybe null untill we rollout extension v1.0
+  questionId  String  @db.Uuid
+  candidateId String  @db.Uuid
+
+  Candidate Candidate               @relation(fields: [candidateId], references: [id])
+  Question  CandidateReviewQuestion @relation(fields: [questionId], references: [id])
+  Reporter  User?                   @relation(fields: [reporterId], references: [id])
+
+  @@unique([questionId, candidateId])
+}
+
+model Publication {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  dateMonth   Int?
+  dateYear    Int?
+  title       String
+  description String?
+  url         String?
+  publisher   String?
+
+  candidateId String    @db.Uuid
+  Candidate   Candidate @relation(fields: [candidateId], references: [id])
+}
+
+model Honor {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  candidateId String   @db.Uuid
+  title       String
+  description String?
+
+  issuer     String?
+  issueMonth Int?
+  issueYear  Int?
+  Candidate  Candidate @relation(fields: [candidateId], references: [id])
+}
+
+model Certification {
+  id            String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt     DateTime @default(now()) @db.Timestamptz
+  authority     String?
+  name          String
+  candidateId   String   @db.Uuid
+  licenseNumber String?
+
+  timePeriodStartMonth Int?
+  timePeriodStartYear  Int?
+  timePeriodEndMonth   Int?
+  timePeriodEndYear    Int?
+
+  Candidate Candidate @relation(fields: [candidateId], references: [id])
+}
+
+model Language {
+  id                    String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt             DateTime              @default(now()) @db.Timestamptz
+  name                  String                @unique
+  LanguageProficiencies LanguageProficiency[]
+}
+
+model LanguageProficiency {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  languageId  String   @db.Uuid
+  candidateId String   @db.Uuid
+
+  Candidate Candidate @relation(fields: [candidateId], references: [id])
+  Language  Language  @relation(fields: [languageId], references: [id])
+  @@unique([languageId, candidateId])
+}
+
+model Industry {
+  id                 String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt          DateTime             @default(now()) @db.Timestamptz
+  name               String               @unique
+  CompanyIndustryMap CompanyIndustryMap[]
+  VacancyIndustryMap VacancyIndustryMap[]
+}
+
+model Company {
+  id                      String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt               DateTime             @default(now()) @db.Timestamptz
+  externalId              String?
+  name                    String
+  location                String?
+  url                     String?
+  employeeCountRangeStart Int?
+  employeeCountRangeEnd   Int?
+  Experience              Experience[]
+  CompanyIndustryMap      CompanyIndustryMap[]
+}
+
+model Project {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  title       String
+  description String?
+
+  timePeriodStartMonth Int?
+  timePeriodStartYear  Int?
+  timePeriodEndMonth   Int?
+  timePeriodEndYear    Int?
+
+  candidateId String     @db.Uuid
+  Candidate   Candidate? @relation(fields: [candidateId], references: [id])
+}
+
+model CompanyIndustryMap {
+  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt  DateTime @default(now()) @db.Timestamptz
+  industryId String   @db.Uuid
+  Industry   Industry @relation(fields: [industryId], references: [id])
+  companyId  String   @db.Uuid
+  Company    Company  @relation(fields: [companyId], references: [id])
+
+  @@unique([industryId, companyId])
+}
+
+model VacancyIndustryMap {
+  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt  DateTime @default(now()) @db.Timestamptz
+  industryId String   @db.Uuid
+  Industry   Industry @relation(fields: [industryId], references: [id])
+  vacancyId  String   @db.Uuid
+  Vacancy    Vacancy  @relation(fields: [vacancyId], references: [id])
+
+  @@unique([vacancyId, industryId])
+}
+
+// Candidate experience
+// it represents experience candidate was working for some company
+// it represents experience candidate was studing at uni
+model Experience {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  description String?
+  candidateId String   @db.Uuid
+
+  // education experience
+  universityId String? @db.Uuid
+  degreeName   String?
+  fieldOfStudy String?
+  grade        String?
+
+  // work experience
+  companyId String? @db.Uuid
+
+
+  timePeriodStartMonth Int?
+  timePeriodStartYear  Int?
+  timePeriodEndMonth   Int?
+  timePeriodEndYear    Int?
+
+  Candidate      Candidate?       @relation(fields: [candidateId], references: [id])
+  Company        Company?         @relation(fields: [companyId], references: [id])
+  University     University?      @relation(fields: [universityId], references: [id])
+  WorkExperience WorkExperience[]
+  @@unique([universityId, candidateId])
+  @@unique([companyId, candidateId])
+}
+
+// work experience entry in company
+// if someone was working in one company in multiple roles they may split it in multiple entires
+model WorkExperience {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  employmentType  String?
+  title           String?
+  description     String?
+  geoLocationName String?
+
+  experienceId String?     @db.Uuid
+  Experience   Experience? @relation(fields: [experienceId], references: [id])
+}
+
+model University {
+  id         String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt  DateTime     @default(now()) @db.Timestamptz
+  name       String
+  externalId String?      @unique
+  Experience Experience[]
+}
+
+model Website {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  url         String
+  label       String?
+  candidateId String    @db.Uuid
+  Candidate   Candidate @relation(fields: [candidateId], references: [id])
+}
+
+model EmailAddress {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  address  String
+  accuracy Int // -1 - 100 accuracy (-1 unknown)
+
+  candidateId String    @db.Uuid
+  Candidate   Candidate @relation(fields: [candidateId], references: [id])
+}
+
+model Candidate {
+  id                 String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt          DateTime  @default(now()) @db.Timestamptz
+  updatedAt          DateTime? @updatedAt @db.Timestamptz
+  emailAddress       String?
+  phoneNumbers       String[] // user entry, not formatted
+  firstName          String?
+  lastName           String?
+  linkedInUrl        String?   @unique
+  avatarS3Bucket     String?
+  avatarThumbS3Key   String?
+  avatarThumbOrigUrl String?
+  breezyId           String?   @unique
+  githubURL          String?
+  industry           String?
+  isCreator          Boolean?
+  isInfluencer       Boolean?
+  hasPremiumLi       Boolean?
+
+  volunteerCauses String[]
+  liHeadline      String? // headline from linkedin like Software Developer @ Acme
+  liSummary       String? // about section from linkedin
+  isStudent       Boolean?
+  country         String?
+  countryCode     String?
+  city            String?
+
+  birthdayYear  Int?
+  birthdayMonth Int?
+
+  // keep track of where candidate came from
+  source        CandidateSource?
+  sourceVersion String?
+
+  CandidateComment CandidateComment[]
+  CandidateSkill   CandidateSkill[]
+
+  CandidateSourcedUser          CandidateSourcedUser[]
+  VacancyCandidateStage         VacancyCandidateStage[]
+  CandidateReviewQuestionAnswer CandidateReviewQuestionAnswer[]
+
+  Thread                Thread[]
+  LanguageProficiency   LanguageProficiency[]
+  Certification         Certification[]
+  Honor                 Honor[]
+  Publication           Publication[]
+  Experience            Experience[]
+  Website               Website[]
+  CandidateListMap      CandidateListMap[]
+  CandidateRaw          CandidateRaw[]
+  CandidateParseHistory CandidateParseHistory[]
+  EmailAddress          EmailAddress[]
+  Project               Project[]
+  CandidateVacancyMatch CandidateVacancyMatch[]
+  UserActivity          UserActivity[]
+}
+
+// A user-managed manual list of candidates
+model CandidateList {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz
+  name      String
+  ownerId   String   @db.Uuid
+  vacancyId String?  @db.Uuid
+  Owner     User     @relation(references: [id], fields: [ownerId])
+  Vacancy   Vacancy? @relation(fields: [vacancyId], references: [id])
+
+  CandidateListMap CandidateListMap[]
+}
+
+// A candidate in a list
+model CandidateListMap {
+  id              String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt       DateTime      @default(now()) @db.Timestamptz
+  candidateListId String        @db.Uuid
+  CandidateList   CandidateList @relation(references: [id], fields: [candidateListId], onDelete: Cascade)
+  candidateId     String        @db.Uuid
+  Candidate       Candidate     @relation(references: [id], fields: [candidateId], onDelete: Cascade)
+  ownerId         String        @db.Uuid
+  Owner           User          @relation(references: [id], fields: [ownerId], onDelete: Cascade)
+
+  @@unique([candidateListId, candidateId, ownerId])
+}
+
+model CandidateComment {
+  id          String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt   DateTime   @default(now()) @db.Timestamptz
+  body        String
+  vacancyId   String?    @db.Uuid
+  userId      String?    @db.Uuid
+  candidateId String?    @db.Uuid
+  Candidate   Candidate? @relation(fields: [candidateId], references: [id])
+  User        User?      @relation(fields: [userId], references: [id])
+  Vacancy     Vacancy?   @relation(fields: [vacancyId], references: [id])
+}
+
+model CandidateSkill {
+  id                   String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  candidateId          String                     @db.Uuid
+  createdAt            DateTime                   @default(now()) @db.Timestamptz
+  skillId              String                     @db.Uuid
+  endorsementCount     Int                        @default(0) // how many times it was endorsed by other users/candidates
+  thirdPartyAssessment ThirdPartySkillAssessment?
+  seniority            Seniority?
+
+  Candidate Candidate @relation(fields: [candidateId], references: [id])
+  Skill     Skill     @relation(fields: [skillId], references: [id])
+
+}
+
+model CandidateSourcedUser {
+  id          String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId      String?    @db.Uuid
+  candidateId String?    @db.Uuid
+  createdAt   DateTime   @default(now()) @db.Timestamptz
+  Candidate   Candidate? @relation(fields: [candidateId], references: [id])
+  User        User?      @relation(fields: [userId], references: [id])
+}
+
+model Client {
+  id         String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name       String
+  createdAt  DateTime     @default(now()) @db.Timestamptz
+  tenantId   String?      @db.Uuid
+  Tenant     Tenant?      @relation(fields: [tenantId], references: [id])
+  User       User[]
+  ClientTeam ClientTeam[]
+  UserInvite UserInvite[]
+  Vacancy    Vacancy[]
+}
+
+model ClientTeam {
+  id         String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt  DateTime     @default(now()) @db.Timestamptz
+  name       String
+  clientId   String?      @db.Uuid
+  ownerId    String?      @unique @db.Uuid
+  tenantId   String?      @db.Uuid
+  Owner      User?        @relation("owner", fields: [ownerId], references: [id])
+  Client     Client?      @relation(fields: [clientId], references: [id])
+  User       User[]       @relation("teamMembers")
+  Tenant     Tenant?      @relation(fields: [tenantId], references: [id])
+  Vacancy    Vacancy[]
+  UserInvite UserInvite[]
+}
+
+model Funnel {
+  id          String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt   DateTime      @default(now()) @db.Timestamptz
+  title       String
+  FunnelStage FunnelStage[]
+  Vacancy     Vacancy[]
+}
+
+model FunnelStage {
+  id            String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt     DateTime @default(now()) @db.Timestamptz
+  funnelId      String?  @db.Uuid
+  ordinalNumber Int
+  stageId       String?  @db.Uuid
+  Funnel        Funnel?  @relation(fields: [funnelId], references: [id])
+  Stage         Stage?   @relation(fields: [stageId], references: [id])
+}
+
+model RecruiterStageVacancy {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz
+  userId    String?  @db.Uuid
+  stageId   String?  @db.Uuid
+  vacancyId String?  @db.Uuid
+  Stage     Stage?   @relation(fields: [stageId], references: [id])
+  User      User?    @relation(fields: [userId], references: [id])
+  Vacancy   Vacancy? @relation(fields: [vacancyId], references: [id])
+}
+
+model Role {
+  id        String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime   @default(now()) @db.Timestamptz
+  title     String     @unique
+  UserRole  UserRole[]
+}
+
+model Scorecard {
+  id                      String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt               DateTime               @default(now()) @db.Timestamptz
+  name                    String
+  vacancyCandidateStageId String?                @db.Uuid
+  VacancyCandidateStage   VacancyCandidateStage? @relation(fields: [vacancyCandidateStageId], references: [id])
+  ScorecardQuestion       ScorecardQuestion[]
+}
+
+model ScorecardQuestion {
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt               DateTime                  @default(now()) @db.Timestamptz
+  title                   String
+  scorecardId             String?                   @db.Uuid
+  Scorecard               Scorecard?                @relation(fields: [scorecardId], references: [id])
+  ScorecardQuestionAnswer ScorecardQuestionAnswer[]
+}
+
+model ScorecardQuestionAnswer {
+  id                  String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt           DateTime           @default(now()) @db.Timestamptz
+  title               String
+  scorecardQuestionId String?            @db.Uuid
+  ScorecardQuestion   ScorecardQuestion? @relation(fields: [scorecardQuestionId], references: [id])
+}
+
+model Skill {
+  id          String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt   DateTime       @default(now()) @db.Timestamptz
+  name        String         @unique
+  category    SkillCategory?
+  description String?
+
+  CandidateSkill CandidateSkill[]
+
+  VacancySkill VacancySkill[]
+}
+
+model Stage {
+  id                   String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt            DateTime      @default(now()) @db.Timestamptz
+  name                 String
+  type                 StageType     @default(SOURCED)
+  parentVirtualStageId String?       @db.Uuid
+  Stage                Stage?        @relation("StageToStage_parentVirtualStageId", fields: [parentVirtualStageId], references: [id])
+  FunnelStage          FunnelStage[]
+
+  RecruiterStageVacancy RecruiterStageVacancy[]
+  other_Stage           Stage[]                 @relation("StageToStage_parentVirtualStageId")
+
+  StageUser StageUser[]
+
+  VacancyCandidateStage VacancyCandidateStage[]
+}
+
+model StageUser {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz
+  stageId   String?  @db.Uuid
+  userId    String?  @db.Uuid
+  Stage     Stage?   @relation(fields: [stageId], references: [id])
+  User      User?    @relation(fields: [userId], references: [id])
+}
+
+model Tenant {
+  id           String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt    DateTime     @default(now()) @db.Timestamptz
+  name         String       @unique
+  emailAddress String?
+  Client       Client[]
+  User         User[]
+  ClientTeam   ClientTeam[]
+  UserInvite   UserInvite[]
+}
+
+model Thread {
+  id                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt         DateTime            @default(now()) @db.Timestamptz
+  vacancyId         String?             @db.Uuid
+  candidateId       String?             @db.Uuid
+  // thread can be connected with candidate or vacancy (above)
+  // but it can also be connected with something outside of our system for example vacancy in another ATS
+  externalContext   String?
+  Vacancy           Vacancy?            @relation(fields: [vacancyId], references: [id])
+  Candidate         Candidate?          @relation(fields: [candidateId], references: [id])
+  Message           Message[]           @relation("Thread")
+  ThreadParticipant ThreadParticipant[]
+}
+
+model Message {
+  id                 String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt          DateTime @default(now()) @db.Timestamptz
+  body               String
+  isSystemMessage    Boolean  @default(false)
+  isDraft            Boolean  @default(true)
+  inReplyToMessageId String?  @db.Uuid
+  senderUserId       String?  @db.Uuid
+  threadId           String   @db.Uuid
+
+  InReplyToMessage Message?  @relation("subThread", fields: [inReplyToMessageId], references: [id])
+  Replies          Message[] @relation("subThread")
+  Thread           Thread?   @relation("Thread", fields: [threadId], references: [id])
+  Sender           User?     @relation(fields: [senderUserId], references: [id])
+
+  ReadReceipt ReadReceipt[]
+}
+
+model ThreadParticipant {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  recipientId String   @db.Uuid
+  threadId    String   @db.Uuid
+  Recipient   User     @relation(fields: [recipientId], references: [id])
+  Thread      Thread   @relation(fields: [threadId], references: [id])
+}
+
+model ReadReceipt {
+  id                         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt                  DateTime  @default(now()) @db.Timestamptz
+  readAt                     DateTime? @default(now()) @db.Timestamptz
+  recipientId                String    @db.Uuid
+  messageId                  String    @db.Uuid
+  unreadNotificationSentDate DateTime? @db.Timestamptz
+
+  Recipient User    @relation(fields: [recipientId], references: [id])
+  Message   Message @relation(fields: [messageId], references: [id])
+
+  @@unique([messageId, recipientId])
+}
+
+model User {
+  id                            String                          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt                     DateTime                        @default(now()) @db.Timestamptz
+  userName                      String                          @unique
+  name                          String?
+  avatarUrl                     String?
+  tenantId                      String?                         @db.Uuid
+  emailAddress                  String
+  inviteId                      String?                         @db.Uuid
+  clientId                      String?                         @db.Uuid
+  clientTeamId                  String?                         @db.Uuid
+  clientTeamAdmin               Boolean?                        @default(false)
+  ClientTeam                    ClientTeam?                     @relation("teamMembers", fields: [clientTeamId], references: [id])
+  OwnedTeam                     ClientTeam?                     @relation("owner")
+  Client                        Client?                         @relation(fields: [clientId], references: [id])
+  Tenant                        Tenant?                         @relation(fields: [tenantId], references: [id])
+  CandidateComment              CandidateComment[]
+  CandidateSourcedUser          CandidateSourcedUser[]
+  RecruiterStageVacancy         RecruiterStageVacancy[]
+  StageUser                     StageUser[]
+  Vacancy                       Vacancy[]
+  Message                       Message[]
+  ReadReceipt                   ReadReceipt[]
+  ThreadParticipant             ThreadParticipant[]
+  Invite                        UserInvite?                     @relation(fields: [inviteId], references: [id])
+  InvitedBy                     UserInvite[]                    @relation("Inviter")
+  CandidateReviewQuestionAnswer CandidateReviewQuestionAnswer[]
+  UserRole                      UserRole[]
+  deletedAt                     DateTime?                       @db.Timestamptz
+  CandidateList                 CandidateList[]
+  CandidateRaw                  CandidateRaw[]
+
+  CandidateListMap CandidateListMap[]
+
+  UserActivity UserActivity[]
+  WorkingHours WorkingHours[]
+  @@index([deletedAt])
+}
+
+model UserRole {
+  id     String  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId String? @db.Uuid
+  User   User?   @relation(fields: [userId], references: [id])
+  roleId String? @db.Uuid
+  Role   Role?   @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId])
+}
+
+model UserInvite {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt    DateTime @default(now()) @db.Timestamptz
+  emailAddress String   @unique
+  groups       String[]
+
+  // claimed?
+  usedByIp String?   @db.Inet
+  usedAt   DateTime? @db.Timestamptz
+
+  // inviter
+  inviterIp String? @db.Inet
+  inviterId String  @db.Uuid
+  Inviter   User    @relation("Inviter", fields: [inviterId], references: [id])
+
+  // links
+  tenantId     String?     @db.Uuid
+  Tenant       Tenant?     @relation(fields: [tenantId], references: [id])
+  clientId     String?     @db.Uuid
+  Client       Client?     @relation(fields: [clientId], references: [id])
+  clientTeamId String?     @db.Uuid
+  ClientTeam   ClientTeam? @relation(fields: [clientTeamId], references: [id])
+  User         User[]
+}
+
+model Vacancy {
+  id            String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt     DateTime        @default(now()) @db.Timestamptz
+  name          String
+  funnelId      String?         @db.Uuid
+  externalId    String?
+  positionCount Int             @default(1)
+  description   String?
+  priority      VacancyPriority @default(NORMAL)
+  status        VacancyStatus   @default(DRAFT)
+  leadUserId    String?         @db.Uuid
+  clientId      String?         @db.Uuid
+  clientTeamId  String?         @db.Uuid
+  location      String?
+  aiChecks      String[]
+
+  Client                  Client?                   @relation(fields: [clientId], references: [id])
+  ClientTeam              ClientTeam?               @relation(fields: [clientTeamId], references: [id])
+  Funnel                  Funnel?                   @relation(fields: [funnelId], references: [id])
+  User                    User?                     @relation(fields: [leadUserId], references: [id])
+  CandidateComment        CandidateComment[]
+  RecruiterStageVacancy   RecruiterStageVacancy[]
+  VacancyCandidateStage   VacancyCandidateStage[]
+  VacancySkill            VacancySkill[]
+  Thread                  Thread[]
+  CandidateReviewQuestion CandidateReviewQuestion[]
+  CandidateList           CandidateList[]
+  VacancyIndustryMap      VacancyIndustryMap[]
+  CandidateVacancyMatch   CandidateVacancyMatch[]
+}
+
+model VacancyCandidateStage {
+  id             String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt      DateTime    @default(now()) @db.Timestamptz
+  stageId        String?     @db.Uuid
+  candidateId    String?     @db.Uuid
+  vacancyId      String?     @db.Uuid
+  isDisqualified Boolean
+  Candidate      Candidate?  @relation(fields: [candidateId], references: [id])
+  Stage          Stage?      @relation(fields: [stageId], references: [id])
+  Vacancy        Vacancy?    @relation(fields: [vacancyId], references: [id])
+  Scorecard      Scorecard[]
+}
+
+model VacancySkill {
+  id         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  vacancyId  String    @db.Uuid
+  skillId    String    @db.Uuid
+  createdAt  DateTime  @default(now()) @db.Timestamptz
+  isRequired Boolean
+  seniority  Seniority @default(ANY)
+
+  Skill   Skill   @relation(fields: [skillId], references: [id])
+  Vacancy Vacancy @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+}
+
+// working hours of user - we will report only activities in that time.
+// startDate and endDate are so users can change working hours.
+model WorkingHours {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  startDate DateTime  @db.Timestamptz
+  endDate   DateTime? @db.Timestamptz
+
+  userId String @db.Uuid
+  User   User   @relation(fields: [userId], references: [id])
+}
+
+// to track time spent on pages by users
+// if it's on LinkedIn/Github of potential candidate we should also link it with candidate
+// if users are on different websites (like facebook or instagram we just record)
+model UserActivity {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz
+  sessionId String   @unique @db.Uuid
+
+  startedAt DateTime @db.Timestamptz
+  endedAt   DateTime @db.Timestamptz
+
+  website  String
+  domain   String
+  category TimeSpentCategory?
+
+  userId      String  @db.Uuid
+  candidateId String? @db.Uuid
+
+  User      User       @relation(fields: [userId], references: [id])
+  Candidate Candidate? @relation(fields: [candidateId], references: [id])
+}
+
+enum TimeSpentCategory {
+  LINKEDIN
+  GITHUB
+  EMAIL
+  SOCIAL_MEDIA
+  ATS
+  OTHER
+}
+
+enum Seniority {
+  ANY
+  INTERN
+  JUNIOR
+  MID
+  SENIOR
+  LEAD
+  PRINCIPAL
+}
+
+enum StageType {
+  SOURCED
+  SCREENED
+  NORMAL
+  HIRED
+  REJECTED
+}
+
+enum VacancyPriority {
+  NORMAL
+  BACKFILL
+  CRUCIAL
+  PAUSED
+}
+
+enum VacancyStatus {
+  OPEN
+  CLOSED
+  DRAFT
+}
+
+enum CandidateSource {
+  BREEZY
+  BROWSER_EXTENSION
+  GITHUB_CRAWLER
+  LEGACY_HR_TOOL
+}
+
+enum QuestionGroup {
+  TECHNICAL_SKILLS
+  SOFT_SKILLS
+}
+
+enum QuestionType {
+  BOOLEAN
+  MULTISELECT
+  SELECT
+  FREEFORM
+  SCALE
+}
+
+enum SkillCategory {
+  INDUSTRY_KNOWLEDGE
+  TOOLS_AND_TECHNOLOGIES
+  SOFT_SKILLS
+  OTHER
+}
+
+enum ThirdPartySkillAssessment {
+  LinkedIn
+  GitHub
+  Coursera
+  AWS
 }

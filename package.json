@@ -7,7 +7,8 @@
     "start": "sst start",
     "build": "sst build",
     "deploy": "sst deploy",
-    "remove": "sst remove"
+    "remove": "sst remove",
+    "postinstall": "prisma generate"
   },
   "eslintConfig": {
     "extends": [
@@ -16,12 +17,12 @@
   },
   "devDependencies": {
     "@aws-cdk/assert": "1.132.0",
-    "prisma": "^3.6.0"
+    "prisma": "^3.8.1"
   },
   "dependencies": {
     "@aws-cdk/aws-lambda-nodejs": "1.132.0",
     "@aws-cdk/core": "1.132.0",
-    "@prisma/client": "^3.6.0",
+    "@prisma/client": "^3.8.1",
     "@serverless-stack/cli": "0.54.2",
     "@serverless-stack/resources": "0.54.2"
   }

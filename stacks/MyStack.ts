@@ -14,6 +14,7 @@ export default class MyStack extends sst.Stack {
         "GET /no-prisma": "src/lambda.handler",
         "GET /prisma": {
           function: {
+            tracing: Tracing.ACTIVE,
             handler: "src/prisma.handler",
             environment: {
               // ...layer.environment,

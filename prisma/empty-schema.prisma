@@ -1,0 +1,13 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["interactiveTransactions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Cool {
+  id String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+}

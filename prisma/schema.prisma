@@ -837,3 +837,9 @@ enum ThirdPartySkillAssessment {
   Coursera
   AWS
 }
+
+/// shared
+
+model Cool {
+  id String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+}
